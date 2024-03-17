@@ -8,11 +8,12 @@ from django.views.generic import (
     DeleteView,
     ListView
 )
-from django.db.models import Count
 from django.db.models.functions import Now
 from django.contrib.auth import get_user_model
+from django.db.models import Count
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.contrib.auth.decorators import login_required
+
 from blog.models import Post, Category, Comment
 from .forms import PostForm, CommentForm
 
@@ -46,18 +47,28 @@ def get_posts_qs():
     is_published: bool = True
     category_is_published: bool = True
     date_time_now = Now()
-    return Post.objects.filter(
+    return Post.objects.select_related(
+        'author', 'category', 'location'
+    ).filter(
         is_published=is_published,
         category__is_published=category_is_published,
         pub_date__lte=date_time_now,
-    )
+    ).order_by('-pub_date').annotate(comment_count=Count('comments'))
+
+
+class PostEditAndCreateAndDeleteMixin:
+    model = Post
+    template_name = 'blog/create.html'
+
+
+class CommentEditAndDeleteMixin:
+    model = Comment
+    template_name = 'blog/comment.html'
 
 
 class PostListView(ListView):
     model = Post
-    queryset = get_posts_qs().annotate(
-        comment_count=Count('comments')
-    )
+    queryset = get_posts_qs()
     paginate_by = 10
     ordering = '-pub_date'
     template_name = 'blog/index.html'
@@ -79,9 +90,8 @@ def post_detail(request, pk):
         request.user.username != str(post.author)
         and (not post.is_published or not post.category.is_published)
     ):
-        raise Http404("Страница не найдена")
-    else:
-        return render(request, template, context)
+        raise Http404('Страница не найдена')
+    return render(request, template, context)
 
 
 def category_posts(request, category_slug):
@@ -90,13 +100,9 @@ def category_posts(request, category_slug):
         Category,
         is_published=True,
         slug=category_slug)
-    posts = Post.objects.select_related(
-        'author', 'category', 'location'
-    ).filter(
+    posts = get_posts_qs().filter(
         category__slug=category_slug,
-        is_published=True,
-        pub_date__lte=Now()
-    ).order_by('-pub_date')
+    )
     page_obj = get_page_obj(request, posts)
     context = {
         'category': category,
@@ -105,10 +111,10 @@ def category_posts(request, category_slug):
     return render(request, template, context)
 
 
-class PostCreateView(LoginRequiredMixin, CreateView):
-    model = Post
+class PostCreateView(
+    LoginRequiredMixin, PostEditAndCreateAndDeleteMixin, CreateView
+):
     form_class = PostForm
-    template_name = 'blog/create.html'
 
     def form_valid(self, form):
         form.instance.author = self.request.user
@@ -121,10 +127,10 @@ class PostCreateView(LoginRequiredMixin, CreateView):
         )
 
 
-class PostUpdateView(LoginRequiredMixin, UpdateView):
-    model = Post
+class PostUpdateView(
+    LoginRequiredMixin, PostEditAndCreateAndDeleteMixin, UpdateView
+):
     form_class = PostForm
-    template_name = 'blog/create.html'
 
     def dispatch(self, request, *args, **kwargs):
         if self.get_object().author != request.user:
@@ -150,10 +156,10 @@ def add_commnet(request, post_id):
     return redirect('blog:post_detail', pk=post_id)
 
 
-class CommentEditView(LoginRequiredMixin, UpdateView):
-    model = Comment
+class CommentEditView(
+    LoginRequiredMixin, CommentEditAndDeleteMixin, UpdateView
+):
     form_class = CommentForm
-    template_name = 'blog/comment.html'
 
     def dispatch(self, request, *args, **kwargs):
         if self.get_object().author != request.user:
@@ -167,9 +173,9 @@ class CommentEditView(LoginRequiredMixin, UpdateView):
         )
 
 
-class CommentDeleteView(LoginRequiredMixin, DeleteView):
-    model = Comment
-    template_name = 'blog/comment.html'
+class CommentDeleteView(
+    LoginRequiredMixin, CommentEditAndDeleteMixin, DeleteView
+):
 
     def dispatch(self, request, *args, **kwargs):
         if self.get_object().author != request.user:
@@ -183,9 +189,9 @@ class CommentDeleteView(LoginRequiredMixin, DeleteView):
         )
 
 
-class PostDeleteView(LoginRequiredMixin, DeleteView):
-    model = Post
-    template_name = 'blog/create.html'
+class PostDeleteView(
+    LoginRequiredMixin, PostEditAndCreateAndDeleteMixin, DeleteView
+):
 
     def dispatch(self, request, *args, **kwargs):
         if self.get_object().author != request.user:
