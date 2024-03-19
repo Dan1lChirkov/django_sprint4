@@ -32,15 +32,21 @@ def get_page_obj(request, posts):
 def profile(request, username):
     template = 'blog/profile.html'
     profile = get_object_or_404(User, username=username)
-    posts = Post.objects.filter(
+    posts = ordered_and_annotated_qs(Post.objects.filter(
         author=profile.id
-    ).order_by('-pub_date').annotate(comment_count=Count('comments'))
+    ))
     page_obj = get_page_obj(request, posts)
     context = {
         'profile': profile,
         'page_obj': page_obj,
     }
     return render(request, template, context)
+
+
+def ordered_and_annotated_qs(queryset):
+    return queryset.order_by('-pub_date').annotate(comment_count=Count(
+        'comments'
+    ))
 
 
 def get_posts_qs():
@@ -56,20 +62,30 @@ def get_posts_qs():
     ).order_by('-pub_date').annotate(comment_count=Count('comments'))
 
 
-class PostEditAndCreateAndDeleteMixin:
+class PostEditAndDeleteMixin:
     model = Post
     template_name = 'blog/create.html'
+
+    def dispatch(self, request, *args, **kwargs):
+        if self.get_object().author != request.user:
+            return redirect('blog:post_detail', pk=self.kwargs['pk'])
+        return super().dispatch(request, *args, **kwargs)
 
 
 class CommentEditAndDeleteMixin:
     model = Comment
     template_name = 'blog/comment.html'
 
+    def dispatch(self, request, *args, **kwargs):
+        if self.get_object().author != request.user:
+            return redirect('blog:post_detail', pk=self.kwargs['pk'])
+        return super().dispatch(request, *args, **kwargs)
+
 
 class PostListView(ListView):
     model = Post
     queryset = get_posts_qs()
-    paginate_by = 10
+    paginate_by = MAX_POSTS_IN_ONE_PAGE
     ordering = '-pub_date'
     template_name = 'blog/index.html'
 
@@ -111,9 +127,9 @@ def category_posts(request, category_slug):
     return render(request, template, context)
 
 
-class PostCreateView(
-    LoginRequiredMixin, PostEditAndCreateAndDeleteMixin, CreateView
-):
+class PostCreateView(LoginRequiredMixin, CreateView):
+    model = Post
+    template_name = 'blog/create.html'
     form_class = PostForm
 
     def form_valid(self, form):
@@ -128,14 +144,9 @@ class PostCreateView(
 
 
 class PostUpdateView(
-    LoginRequiredMixin, PostEditAndCreateAndDeleteMixin, UpdateView
+    LoginRequiredMixin, PostEditAndDeleteMixin, UpdateView
 ):
     form_class = PostForm
-
-    def dispatch(self, request, *args, **kwargs):
-        if self.get_object().author != request.user:
-            return redirect('blog:post_detail', pk=self.kwargs['pk'])
-        return super().dispatch(request, *args, **kwargs)
 
     def get_success_url(self):
         return reverse(
@@ -161,11 +172,6 @@ class CommentEditView(
 ):
     form_class = CommentForm
 
-    def dispatch(self, request, *args, **kwargs):
-        if self.get_object().author != request.user:
-            return redirect('blog:post_detail', pk=self.kwargs['pk'])
-        return super().dispatch(request, *args, **kwargs)
-
     def get_success_url(self):
         return reverse(
             'blog:post_detail',
@@ -177,11 +183,6 @@ class CommentDeleteView(
     LoginRequiredMixin, CommentEditAndDeleteMixin, DeleteView
 ):
 
-    def dispatch(self, request, *args, **kwargs):
-        if self.get_object().author != request.user:
-            return redirect('blog:post_detail', pk=self.kwargs['pk'])
-        return super().dispatch(request, *args, **kwargs)
-
     def get_success_url(self):
         return reverse_lazy(
             'blog:profile',
@@ -190,13 +191,8 @@ class CommentDeleteView(
 
 
 class PostDeleteView(
-    LoginRequiredMixin, PostEditAndCreateAndDeleteMixin, DeleteView
+    LoginRequiredMixin, PostEditAndDeleteMixin, DeleteView
 ):
-
-    def dispatch(self, request, *args, **kwargs):
-        if self.get_object().author != request.user:
-            return redirect('blog:post_detail', pk=self.kwargs['pk'])
-        return super().dispatch(request, *args, **kwargs)
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
