@@ -53,13 +53,13 @@ def get_posts_qs():
     is_published: bool = True
     category_is_published: bool = True
     date_time_now = Now()
-    return Post.objects.select_related(
+    return ordered_and_annotated_qs(Post.objects.select_related(
         'author', 'category', 'location'
     ).filter(
         is_published=is_published,
         category__is_published=category_is_published,
         pub_date__lte=date_time_now,
-    ).order_by('-pub_date').annotate(comment_count=Count('comments'))
+    ))
 
 
 class PostEditAndDeleteMixin:
